@@ -1,0 +1,14 @@
+# Ignore Wi-Fi credentials
+wifi_config.py
+
+# Python and Thonny project files
+__pycache__/
+*.pyc
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor swap/temp files
+*~
+*.swp
