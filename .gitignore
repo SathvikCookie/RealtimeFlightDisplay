@@ -1,5 +1,5 @@
 # Ignore Wi-Fi credentials
-wifi_config.py
+config.py
 
 # Python and Thonny project files
 __pycache__/
