@@ -54,4 +54,5 @@ def get_visible_planes():
             "bearing": int(bearing)
         })
     
+    visible_planes.sort(key=lambda item: item.get("distance_km", float('inf')))
     return visible_planes
