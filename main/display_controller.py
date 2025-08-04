@@ -2,6 +2,7 @@ from machine import SPI, Pin
 from ST7796 import LCD_35_ST7796, SPI_W_SPEED, Delay_Ms
 from Font_6x12_EN import Font_6x12_EN
 import time
+import math
 
 #pin define
 LCD_RS = 2
@@ -11,224 +12,391 @@ LCD_SDA = 13
 LCD_SDO = 12
 LCD_BL = 27
 
-# Enhanced color palette
+# Cyberpunk Purple Color Palette
 BLACK = 0x0000
 WHITE = 0xFFFF
-BLUE = 0x001F
-GREEN = 0x07E0
-RED = 0xF800
-YELLOW = 0xFFE0
-CYAN = 0x07FF
-MAGENTA = 0xF81F
-GRAY = 0x8410
-DARK_GRAY = 0x4208
-LIGHT_BLUE = 0x3D9F
-ORANGE = 0xFD20
-LIGHT_GRAY = 0xC618
-DARK_GREEN = 0x0320
-PURPLE = 0x8010
+DEEP_BLACK = 0x0820          # Almost black with hint of purple
+DARK_PURPLE = 0x2104         # Deep purple background
+MEDIUM_PURPLE = 0x4A49       # Medium purple for panels
+BRIGHT_PURPLE = 0x8C71       # Bright purple accents
+NEON_PURPLE = 0xA254         # Electric purple
+NEON_PINK = 0xF81F           # Hot pink/magenta
+NEON_CYAN = 0x07FF           # Electric cyan
+NEON_GREEN = 0x07E0          # Matrix green
+ELECTRIC_BLUE = 0x1C9F       # Electric blue
+GRID_PURPLE = 0x3186         # Grid line purple
+TERMINAL_GREEN = 0x0400      # Dark terminal green
+AMBER = 0xFD00               # Retro amber
+ORANGE_RED = 0xFA00          # Warning orange-red
+GRAY_BLUE = 0x528A           # Muted blue-gray
+SCAN_LINE = 0x18E3           # Scanline effect color
 
 spi = SPI(1,baudrate=SPI_W_SPEED,sck=Pin(LCD_SCK),mosi=Pin(LCD_SDA),miso=Pin(LCD_SDO))
 mylcd = LCD_35_ST7796(spi, LCD_CS, LCD_RS, LCD_BL)
 mylcd.LCD_Set_Rotate(1)
 
-def draw_header():
-    """Draw a professional header"""
-    # Header background with gradient effect
-    mylcd.Fill_Rect(0, 0, mylcd.lcd_width, 35, DARK_GRAY)
-    mylcd.Fill_Rect(0, 0, mylcd.lcd_width, 2, BLUE)
-    
-    # Title with plane icon
-    mylcd.Show_String(10, 10, "FLIGHT RADAR", Font_6x12_EN, WHITE)
-    draw_plane_icon(130, 16, WHITE)
-    
-    # Status indicator
-    mylcd.Show_String(mylcd.lcd_width - 50, 10, "LIVE", Font_6x12_EN, GREEN)
-    mylcd.Fill_Circle(mylcd.lcd_width - 60, 16, 3, GREEN)
-    
-    # Bottom border
-    mylcd.Draw_Hline(0, 35, mylcd.lcd_width, LIGHT_GRAY)
+# Global state tracking
+display_initialized = False
+last_plane_count = -1
+content_area_y = 70
+content_area_height = 0
 
-def draw_plane_icon(x, y, color=WHITE):
-    """Draw a plane icon"""
-    # Main fuselage
-    mylcd.Draw_Hline(x-8, y, 16, color)
-    # Wings
-    mylcd.Draw_Hline(x-10, y-1, 20, color)
-    mylcd.Draw_Hline(x-6, y+1, 12, color)
-    # Tail
-    mylcd.Draw_Point(x+8, y-2, color)
-    mylcd.Draw_Point(x+8, y+2, color)
-    mylcd.Draw_Point(x+7, y-1, color)
-    mylcd.Draw_Point(x+7, y+1, color)
+def draw_scanlines():
+    """Draw subtle scanlines across the entire screen for retro CRT effect"""
+    for y in range(0, mylcd.lcd_height, 4):
+        mylcd.Draw_Hline(0, y, mylcd.lcd_width, SCAN_LINE)
 
-def get_altitude_color(altitude):
-    """Return color based on altitude"""
-    if altitude < 1000:
-        return RED
-    elif altitude < 3000:
-        return ORANGE
-    elif altitude < 8000:
-        return YELLOW
-    elif altitude < 15000:
-        return GREEN
-    else:
-        return CYAN
+def draw_grid_pattern(x, y, width, height):
+    """Draw a cyberpunk grid pattern"""
+    # Vertical grid lines
+    for i in range(x, x + width, 20):
+        mylcd.Draw_Vline(i, y, height, GRID_PURPLE)
+    
+    # Horizontal grid lines
+    for i in range(y, y + height, 15):
+        mylcd.Draw_Hline(x, i, width, GRID_PURPLE)
 
-def get_distance_color(distance):
-    """Return color based on distance"""
-    if distance < 5:
-        return RED
-    elif distance < 15:
-        return ORANGE
-    elif distance < 30:
-        return YELLOW
-    else:
-        return GREEN
+def draw_cyberpunk_border(x, y, width, height, color=NEON_PURPLE):
+    """Draw a cyberpunk-style border with corner details"""
+    # Main rectangle
+    mylcd.Draw_Rect(x, y, width, height, color)
+    
+    # Corner decorations
+    corner_size = 8
+    # Top-left
+    mylcd.Draw_Hline(x-2, y-2, corner_size, color)
+    mylcd.Draw_Vline(x-2, y-2, corner_size, color)
+    
+    # Top-right
+    mylcd.Draw_Hline(x + width - corner_size + 2, y-2, corner_size, color)
+    mylcd.Draw_Vline(x + width + 1, y-2, corner_size, color)
+    
+    # Bottom-left
+    mylcd.Draw_Hline(x-2, y + height + 1, corner_size, color)
+    mylcd.Draw_Vline(x-2, y + height - corner_size + 2, corner_size, color)
+    
+    # Bottom-right
+    mylcd.Draw_Hline(x + width - corner_size + 2, y + height + 1, corner_size, color)
+    mylcd.Draw_Vline(x + width + 1, y + height - corner_size + 2, corner_size, color)
 
-def draw_info_box(x, y, width, height, title, value, color=WHITE):
-    """Draw a styled information box"""
-    # Box outline
-    mylcd.Draw_Rect(x, y, width, height, GRAY)
-    # Title background
-    mylcd.Fill_Rect(x+1, y+1, width-2, 12, DARK_GRAY)
-    # Title text
-    mylcd.Show_String(x+3, y+3, title, Font_6x12_EN, LIGHT_GRAY)
-    # Value text
-    mylcd.Show_String(x+3, y+15, value, Font_6x12_EN, color)
-
-def draw_bearing_indicator(x, y, bearing):
-    """Draw a compass bearing indicator"""
-    # Outer circle
-    mylcd.Draw_Circle(x, y, 12, GRAY)
-    # Inner dot
-    mylcd.Fill_Circle(x, y, 2, WHITE)
+def initialize_static_display():
+    """Draw all static elements once"""
+    global display_initialized, content_area_height
     
-    # Calculate bearing line
-    import math
-    rad = math.radians(bearing - 90)  # -90 so 0° points north
-    end_x = int(x + 10 * math.cos(rad))
-    end_y = int(y + 10 * math.sin(rad))
-    
-    # Bearing line
-    mylcd.Draw_line(x, y, end_x, end_y, YELLOW)
-    mylcd.Fill_Circle(end_x, end_y, 1, YELLOW)
-    
-    # North indicator
-    mylcd.Show_String(x-3, y-20, "N", Font_6x12_EN, WHITE)
-
-def draw_flight_card(plane, y_pos, is_closest=False):
-    """Draw an enhanced flight information card"""
-    card_height = 55
-    card_width = mylcd.lcd_width - 20
-    x = 10
-    
-    # Card background - highlight closest plane
-    bg_color = DARK_GREEN if is_closest else BLACK
-    border_color = GREEN if is_closest else GRAY
-    
-    mylcd.Fill_Rect(x, y_pos, card_width, card_height, bg_color)
-    mylcd.Draw_Rect(x, y_pos, card_width, card_height, border_color)
-    
-    # Callsign with plane icon
-    callsign = plane.get('callsign', '[NO CALL]')[:10]
-    draw_plane_icon(x + 15, y_pos + 8, WHITE)
-    mylcd.Show_String(x + 30, y_pos + 5, callsign, Font_6x12_EN, WHITE)
-    
-    # Distance badge (top right)
-    dist_color = get_distance_color(plane['distance_km'])
-    dist_text = f"{plane['distance_km']}km"
-    mylcd.Show_String(x + card_width - 50, y_pos + 5, dist_text, Font_6x12_EN, dist_color)
-    
-    # Altitude with color coding
-    alt_color = get_altitude_color(plane['alt'])
-    alt_text = f"ALT: {plane['alt']:,}m"
-    mylcd.Show_String(x + 5, y_pos + 20, alt_text, Font_6x12_EN, alt_color)
-    
-    # Country origin
-    country = plane.get('origin', 'Unknown')[:12]
-    mylcd.Show_String(x + 5, y_pos + 35, f"FROM: {country}", Font_6x12_EN, LIGHT_GRAY)
-    
-    # Bearing with mini compass
-    bearing_text = f"{plane['bearing']}°"
-    mylcd.Show_String(x + card_width - 80, y_pos + 25, bearing_text, Font_6x12_EN, WHITE)
-    draw_bearing_indicator(x + card_width - 25, y_pos + 35, plane['bearing'])
-
-def draw_no_planes_screen():
-    """Draw screen when no planes are visible"""
-    mylcd.LCD_Clear(BLACK)
-    draw_header()
-    
-    # Center message
-    center_y = mylcd.lcd_height // 2 - 30
-    
-    # Large plane icon
-    draw_plane_icon(mylcd.lcd_width // 2, center_y - 20, GRAY)
-    
-    # Message
-    mylcd.Show_String(80, center_y, "No aircraft visible", Font_6x12_EN, GRAY)
-    mylcd.Show_String(85, center_y + 15, "in viewing area", Font_6x12_EN, GRAY)
-    
-    # Search parameters info
-    mylcd.Show_String(50, center_y + 40, "Scanning nearby airspace...", Font_6x12_EN, DARK_GRAY)
-
-def draw_footer(plane_count, last_update_time=None):
-    """Draw footer with status information"""
-    footer_y = mylcd.lcd_height - 25
-    
-    # Footer background
-    mylcd.Fill_Rect(0, footer_y, mylcd.lcd_width, 25, DARK_GRAY)
-    mylcd.Draw_Hline(0, footer_y, mylcd.lcd_width, LIGHT_GRAY)
-    
-    # Plane count
-    count_text = f"Aircraft: {plane_count}"
-    mylcd.Show_String(10, footer_y + 8, count_text, Font_6x12_EN, WHITE)
-    
-    # Update indicator
-    mylcd.Show_String(mylcd.lcd_width - 70, footer_y + 8, "AUTO", Font_6x12_EN, GREEN)
-    # Blinking dot for activity
-    mylcd.Fill_Circle(mylcd.lcd_width - 20, footer_y + 12, 2, GREEN)
-
-def show_planes(planes):
-    """Main display function with enhanced UI"""
-    mylcd.LCD_Clear(BLACK)
+    mylcd.LCD_Clear(DEEP_BLACK)
+    draw_scanlines()
     
     # Draw header
-    draw_header()
+    mylcd.Fill_Rect(0, 0, mylcd.lcd_width, 40, DEEP_BLACK)
+    mylcd.Fill_Rect(0, 0, mylcd.lcd_width, 3, NEON_PURPLE)
+    mylcd.Fill_Rect(0, 3, mylcd.lcd_width, 1, NEON_PINK)
+    
+    # Grid pattern in header
+    draw_grid_pattern(0, 5, mylcd.lcd_width, 30)
+    
+    # Title with appropriate styling
+    mylcd.Show_String(10, 10, "FLIGHT RADAR v2.1", Font_6x12_EN, NEON_CYAN)
+    mylcd.Show_String(10, 25, " AIRSPACE MONITOR", Font_6x12_EN, TERMINAL_GREEN)
+    
+    # Status indicators
+    draw_status_led(mylcd.lcd_width - 80, 12, NEON_GREEN, "ONLINE")
+    draw_status_led(mylcd.lcd_width - 80, 25, NEON_PINK, "TRACK")
+    
+    # Header border
+    mylcd.Draw_Hline(0, 40, mylcd.lcd_width, NEON_PURPLE)
+    mylcd.Draw_Hline(0, 41, mylcd.lcd_width, BRIGHT_PURPLE)
+    
+    # Info bar background (static)
+    info_y = 45
+    mylcd.Fill_Rect(0, info_y, mylcd.lcd_width, 20, MEDIUM_PURPLE)
+    
+    # Status bar background (static)
+    status_height = 25
+    status_y = mylcd.lcd_height - status_height
+    mylcd.Fill_Rect(0, status_y, mylcd.lcd_width, status_height, DEEP_BLACK)
+    mylcd.Draw_Hline(0, status_y, mylcd.lcd_width, NEON_PURPLE)
+    mylcd.Draw_Hline(0, status_y + 1, mylcd.lcd_width, BRIGHT_PURPLE)
+    
+    # Static status bar text
+    mylcd.Show_String(5, status_y + 8, "SYS:OK", Font_6x12_EN, NEON_GREEN)
+    mylcd.Show_String(50, status_y + 8, "ADS-B", Font_6x12_EN, NEON_CYAN)
+    mylcd.Show_String(110, status_y + 8, "REALTIME", Font_6x12_EN, AMBER)
+    
+    content_area_height = mylcd.lcd_height - 95
+    display_initialized = True
+
+def draw_status_led(x, y, color, text):
+    """Draw a small status LED with text"""
+    # LED with glow effect
+    mylcd.Fill_Circle(x, y, 3, color)
+    mylcd.Fill_Circle(x, y, 1, WHITE)
+    mylcd.Draw_Circle(x, y, 4, color)
+    
+    # Status text
+    mylcd.Show_String(x + 8, y - 6, text, Font_6x12_EN, color)
+
+def draw_retro_plane_icon(x, y, color=NEON_CYAN, size=1):
+    """Draw a pixelated retro plane icon"""
+    s = size
+    # Main body (more angular/pixelated)
+    mylcd.Fill_Rect(x-6*s, y-1*s, 12*s, 2*s, color)
+    mylcd.Fill_Rect(x-4*s, y-2*s, 8*s, 1*s, color)
+    mylcd.Fill_Rect(x-4*s, y+1*s, 8*s, 1*s, color)
+    
+    # Wings (more geometric)
+    mylcd.Fill_Rect(x-8*s, y-3*s, 16*s, 1*s, color)
+    mylcd.Fill_Rect(x-2*s, y+2*s, 8*s, 1*s, color)
+    
+    # Tail (sharp angles)
+    mylcd.Fill_Rect(x+6*s, y-4*s, 2*s, 2*s, color)
+    mylcd.Fill_Rect(x+6*s, y+2*s, 2*s, 2*s, color)
+    
+    # Nose (pointed)
+    mylcd.Fill_Rect(x-8*s, y, 2*s, 1*s, color)
+
+def get_altitude_color_cyber(altitude):
+    """Return cyberpunk colors based on altitude"""
+    if altitude < 1000:
+        return ORANGE_RED
+    elif altitude < 3000:
+        return AMBER
+    elif altitude < 8000:
+        return NEON_PINK
+    elif altitude < 15000:
+        return NEON_PURPLE
+    else:
+        return NEON_CYAN
+
+def get_distance_color_cyber(distance):
+    """Return cyberpunk colors based on distance"""
+    if distance < 5:
+        return NEON_GREEN
+    elif distance < 15:
+        return NEON_CYAN
+    elif distance < 30:
+        return NEON_PURPLE
+    else:
+        return GRAY_BLUE
+
+def draw_radar_compass(x, y, bearing):
+    """Draw a retro radar-style compass"""
+    radius = 15
+    
+    # Clear the area first
+    mylcd.Fill_Circle(x, y, radius + 2, DARK_PURPLE)
+    
+    # Outer circle with scan effect
+    mylcd.Draw_Circle(x, y, radius, NEON_PURPLE)
+    mylcd.Draw_Circle(x, y, radius-1, BRIGHT_PURPLE)
+    
+    # Grid lines (crosshairs)
+    mylcd.Draw_Hline(x-radius, y, radius*2, GRID_PURPLE)
+    mylcd.Draw_Vline(x, y-radius, radius*2, GRID_PURPLE)
+    
+    # Diagonal lines
+    for i in range(-radius+2, radius-1):
+        mylcd.Draw_Point(x+i, y+i, GRID_PURPLE)
+        mylcd.Draw_Point(x+i, y-i, GRID_PURPLE)
+    
+    # Center dot
+    mylcd.Fill_Circle(x, y, 2, NEON_GREEN)
+    
+    # Bearing indicator
+    rad = math.radians(bearing - 90)
+    end_x = int(x + (radius-3) * math.cos(rad))
+    end_y = int(y + (radius-3) * math.sin(rad))
+    
+    mylcd.Draw_line(x, y, end_x, end_y, NEON_CYAN)
+    mylcd.Fill_Circle(end_x, end_y, 2, NEON_CYAN)
+
+def clear_content_area():
+    """Clear only the content area for updates"""
+    mylcd.Fill_Rect(10, content_area_y, mylcd.lcd_width - 20, content_area_height, DEEP_BLACK)
+
+def update_info_bar(plane_count, closest_dist=None):
+    """Update just the info bar text"""
+    info_y = 45
+    # Clear text area
+    mylcd.Fill_Rect(5, info_y + 2, mylcd.lcd_width - 10, 16, MEDIUM_PURPLE)
+    
+    # Update plane count
+    if plane_count < 10:
+        count_text = "TRACKING:0" + str(plane_count) + "_AIRCRAFT"
+    else:
+        count_text = "TRACKING:" + str(plane_count) + "_AIRCRAFT"
+    mylcd.Show_String(10, info_y + 5, count_text, Font_6x12_EN, NEON_GREEN)
+    
+    # Update closest distance
+    if closest_dist is not None:
+        closest_val = int(closest_dist)
+        if closest_val < 10:
+            nearest_text = "NEAREST:00" + str(closest_val) + "KM"
+        elif closest_val < 100:
+            nearest_text = "NEAREST:0" + str(closest_val) + "KM"
+        else:
+            nearest_text = "NEAREST:" + str(closest_val) + "KM"
+        mylcd.Show_String(180, info_y + 5, nearest_text, Font_6x12_EN, NEON_PINK)
+
+def update_status_activity():
+    """Update just the activity indicator in status bar"""
+    status_y = mylcd.lcd_height - 25
+    # Clear activity area
+    mylcd.Fill_Rect(mylcd.lcd_width - 70, status_y + 5, 65, 15, DEEP_BLACK)
+    
+    mylcd.Show_String(mylcd.lcd_width - 60, status_y + 8, "ACTIVE", Font_6x12_EN, NEON_PINK)
+    # Blinking dot
+    mylcd.Fill_Circle(mylcd.lcd_width - 10, status_y + 12, 3, NEON_GREEN)
+
+def draw_data_panel(plane, y_pos, is_priority=False):
+    """Draw a cyberpunk data panel for each aircraft"""
+    panel_height = 60
+    panel_width = mylcd.lcd_width - 20
+    x = 10
+    
+    # Panel background
+    if is_priority:
+        mylcd.Fill_Rect(x-1, y_pos-1, panel_width+2, panel_height+2, NEON_PURPLE)
+        mylcd.Fill_Rect(x, y_pos, panel_width, panel_height, DARK_PURPLE)
+        draw_cyberpunk_border(x, y_pos, panel_width, panel_height, NEON_PINK)
+    else:
+        mylcd.Fill_Rect(x, y_pos, panel_width, panel_height, MEDIUM_PURPLE)
+        draw_cyberpunk_border(x, y_pos, panel_width, panel_height, BRIGHT_PURPLE)
+    
+    # Grid pattern in background
+    draw_grid_pattern(x+2, y_pos+2, panel_width-4, panel_height-4)
+    
+    # Aircraft icon
+    icon_color = NEON_PINK if is_priority else NEON_CYAN
+    draw_retro_plane_icon(x + 20, y_pos + 15, icon_color)
+    
+    # Callsign with terminal styling
+    callsign = plane.get('callsign', '[UNKNOWN]')[:10]
+    mylcd.Show_String(x + 35, y_pos + 8, "ID:" + callsign, Font_6x12_EN, NEON_CYAN)
+    
+    # Distance with digital readout style
+    dist_color = get_distance_color_cyber(plane['distance_km'])
+    dist_val = int(plane['distance_km'])
+    if dist_val < 10:
+        dist_text = "RNG:00" + str(dist_val) + "KM"
+    elif dist_val < 100:
+        dist_text = "RNG:0" + str(dist_val) + "KM"
+    else:
+        dist_text = "RNG:" + str(dist_val) + "KM"
+    mylcd.Show_String(x + panel_width - 80, y_pos + 8, dist_text, Font_6x12_EN, dist_color)
+    
+    # Altitude with color coding
+    alt_color = get_altitude_color_cyber(plane['alt'])
+    alt_val = int(plane['alt'])
+    alt_str = str(alt_val)
+    while len(alt_str) < 5:
+        alt_str = "0" + alt_str
+    alt_text = "ALT:" + alt_str + "M"
+    mylcd.Show_String(x + 5, y_pos + 25, alt_text, Font_6x12_EN, alt_color)
+    
+    # Origin with data format
+    country = plane.get('origin', 'UNK')[:8]
+    mylcd.Show_String(x + 5, y_pos + 40, "FROM:" + country, Font_6x12_EN, GRAY_BLUE)
+    
+    # Bearing with compass
+    bearing_val = int(plane['bearing'])
+    if bearing_val < 10:
+        bearing_text = "HDG:00" + str(bearing_val)
+    elif bearing_val < 100:
+        bearing_text = "HDG:0" + str(bearing_val)
+    else:
+        bearing_text = "HDG:" + str(bearing_val)
+    mylcd.Show_String(x + panel_width - 100, y_pos + 25, bearing_text, Font_6x12_EN, AMBER)
+    draw_radar_compass(x + panel_width - 25, y_pos + 35, plane['bearing'])
+    
+    # Data stream effect (moving dots)
+    for i in range(3):
+        dot_x = x + 150 + i * 15
+        mylcd.Fill_Circle(dot_x, y_pos + 45, 1, TERMINAL_GREEN)
+
+def draw_no_signal_screen():
+    """Draw screen when no aircraft detected - cyberpunk style"""
+    if not display_initialized:
+        initialize_static_display()
+    
+    clear_content_area()
+    update_info_bar(0)
+    
+    # Large central display
+    center_y = mylcd.lcd_height // 2 - 40
+    
+    # Radar sweep circle
+    mylcd.Draw_Circle(mylcd.lcd_width // 2, center_y, 80, NEON_PURPLE)
+    mylcd.Draw_Circle(mylcd.lcd_width // 2, center_y, 60, BRIGHT_PURPLE)
+    mylcd.Draw_Circle(mylcd.lcd_width // 2, center_y, 40, GRID_PURPLE)
+    mylcd.Draw_Circle(mylcd.lcd_width // 2, center_y, 20, GRID_PURPLE)
+    
+    # Crosshairs
+    mylcd.Draw_Hline(mylcd.lcd_width // 2 - 80, center_y, 160, GRID_PURPLE)
+    mylcd.Draw_Vline(mylcd.lcd_width // 2, center_y - 80, 160, GRID_PURPLE)
+    
+    # Center aircraft icon
+    draw_retro_plane_icon(mylcd.lcd_width // 2, center_y, GRAY_BLUE, 2)
+    
+    # Status messages
+    mylcd.Show_String(60, center_y + 100, ">>> NO AIRCRAFT DETECTED <<<", Font_6x12_EN, ORANGE_RED)
+    mylcd.Show_String(80, center_y + 115, "SCANNING AIRSPACE...", Font_6x12_EN, TERMINAL_GREEN)
+    mylcd.Show_String(100, center_y + 130, "STANDBY MODE", Font_6x12_EN, NEON_CYAN)
+    
+    update_status_activity()
+
+def show_planes(planes):
+    """Main display function with optimized updates"""
+    global last_plane_count
+    
+    # Initialize static elements if needed
+    if not display_initialized:
+        initialize_static_display()
     
     if not planes:
-        draw_no_planes_screen()
+        draw_no_signal_screen()
+        last_plane_count = 0
         return
     
-    # Status bar
-    status_y = 40
-    mylcd.Show_String(10, status_y, f"Tracking {len(planes)} aircraft", Font_6x12_EN, GREEN)
+    # Only clear and redraw if plane count changed significantly
+    current_count = len(planes)
+    if abs(current_count - last_plane_count) > 0:
+        clear_content_area()
+        last_plane_count = current_count
     
-    if len(planes) > 0:
-        closest_dist = planes[0]['distance_km']
-        mylcd.Show_String(200, status_y, f"Closest: {closest_dist}km", Font_6x12_EN, YELLOW)
+    # Update info bar
+    closest_dist = planes[0]['distance_km'] if planes else None
+    update_info_bar(current_count, closest_dist)
     
-    # Calculate how many planes can fit
-    available_height = mylcd.lcd_height - 95  # Account for header, status, footer
-    card_height = 55
-    card_spacing = 5
-    max_planes = available_height // (card_height + card_spacing)
+    # Calculate display area
+    panel_height = 60
+    panel_spacing = 5
+    max_planes = content_area_height // (panel_height + panel_spacing)
     
-    # Display planes
-    start_y = 60
+    # Display aircraft panels
     planes_to_show = min(len(planes), max_planes)
     
     for i in range(planes_to_show):
         plane = planes[i]
-        card_y = start_y + i * (card_height + card_spacing)
-        is_closest = (i == 0)  # Highlight the closest plane
-        draw_flight_card(plane, card_y, is_closest)
+        panel_y = content_area_y + i * (panel_height + panel_spacing)
+        is_priority = (i == 0)  # Highlight closest target
+        draw_data_panel(plane, panel_y, is_priority)
     
-    # Show remaining count if there are more planes
+    # Overflow indicator
     if len(planes) > planes_to_show:
         remaining = len(planes) - planes_to_show
-        mylcd.Show_String(10, mylcd.lcd_height - 45, 
-                         f"+ {remaining} more aircraft", Font_6x12_EN, ORANGE)
+        overflow_y = mylcd.lcd_height - 50
+        mylcd.Fill_Rect(5, overflow_y, mylcd.lcd_width - 10, 15, DARK_PURPLE)
+        if remaining < 10:
+            remaining_text = ">>> 0" + str(remaining) + " MORE AIRCRAFT IN RANGE <<<"
+        else:
+            remaining_text = ">>> " + str(remaining) + " MORE AIRCRAFT IN RANGE <<<"
+        mylcd.Show_String(10, overflow_y + 3, remaining_text, Font_6x12_EN, AMBER)
     
-    # Draw footer
-    draw_footer(len(planes))
+    # Update activity indicator
+    update_status_activity()
+
+# Function to force full redraw (call this occasionally or on errors)
+def force_refresh():
+    """Force a complete display refresh"""
+    global display_initialized
+    display_initialized = False
